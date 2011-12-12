@@ -73,6 +73,7 @@ DLLEXPORT UINT_PTR WINAPI ReflectiveLoader( VOID )
 	UINT_PTR uiValueB;
 	UINT_PTR uiValueC;
 	UINT_PTR uiValueD;
+	UINT_PTR uiValueE;
 
 	// STEP 0: calculate our images current base address
 
@@ -220,7 +221,8 @@ DLLEXPORT UINT_PTR WINAPI ReflectiveLoader( VOID )
 	uiValueA = ( (UINT_PTR)&((PIMAGE_NT_HEADERS)uiHeaderValue)->OptionalHeader + ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.SizeOfOptionalHeader );
 	
 	// itterate through all sections, loading them into memory.
-	while( ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.NumberOfSections-- )
+	uiValueE = ((PIMAGE_NT_HEADERS)uiHeaderValue)->FileHeader.NumberOfSections;
+	while( uiValueE-- )
 	{
 		// uiValueB is the VA for this section
 		uiValueB = ( uiBaseAddress + ((PIMAGE_SECTION_HEADER)uiValueA)->VirtualAddress );
