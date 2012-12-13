@@ -1,5 +1,5 @@
 //===============================================================================================//
-// Copyright (c) 2011, Stephen Fewer of Harmony Security (www.harmonysecurity.com)
+// Copyright (c) 2012, Stephen Fewer of Harmony Security (www.harmonysecurity.com)
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without modification, are permitted 
@@ -26,6 +26,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //===============================================================================================//
 #include "LoadLibraryR.h"
+#include <stdio.h>
 //===============================================================================================//
 DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress )
 {    
@@ -57,9 +58,10 @@ DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
 	UINT_PTR uiAddressArray  = 0;
 	UINT_PTR uiNameOrdinals  = 0;
 	DWORD dwCounter          = 0;
-#ifdef _WIN64
+#ifdef WIN_X64
 	DWORD dwCompiledArch = 2;
 #else
+	// This will catch Win32 and WinRT.
 	DWORD dwCompiledArch = 1;
 #endif
 
@@ -212,9 +214,9 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			// write the image into the host process...
 			if( !WriteProcessMemory( hProcess, lpRemoteLibraryBuffer, lpBuffer, dwLength, NULL ) )
 				break;
-
+			
 			// add the offset to ReflectiveLoader() to the remote library address...
-			lpReflectiveLoader = (LPTHREAD_START_ROUTINE)( (DWORD)lpRemoteLibraryBuffer + (DWORD)dwReflectiveLoaderOffset );
+			lpReflectiveLoader = (LPTHREAD_START_ROUTINE)( (ULONG_PTR)lpRemoteLibraryBuffer + dwReflectiveLoaderOffset );
 
 			// create a remote thread in the host process to call the ReflectiveLoader!
 			hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
