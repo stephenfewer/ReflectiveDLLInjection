@@ -1,5 +1,6 @@
 Release/
 Debug/
+x64/
 dll/Release/
 dll/Debug/
 dll/reflective_dll.vcproj.*.user
