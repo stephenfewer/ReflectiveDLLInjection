@@ -47,6 +47,7 @@ int main( int argc, char * argv[] )
 	DWORD dwBytesRead     = 0;
 	DWORD dwProcessId     = 0;
 	TOKEN_PRIVILEGES priv = {0};
+	DWORD tmp = 0;
 
 #ifdef WIN_X64
 	char * cpDllFile  = "reflective_dll.x64.dll";
@@ -106,7 +107,12 @@ int main( int argc, char * argv[] )
 
 		printf( "[+] Injected the '%s' DLL into process %d.", cpDllFile, dwProcessId );
 		
-		WaitForSingleObject( hModule, -1 );
+		tmp = WaitForSingleObject( hModule, INFINITE );
+		printf("return %d\n", tmp);
+
+		if (tmp == WAIT_FAILED) {
+			printf("winerr %d\n", GetLastError());
+		}
 
 	} while( 0 );
 

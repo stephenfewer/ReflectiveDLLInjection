@@ -28,6 +28,35 @@
 #include "LoadLibraryR.h"
 #include <stdio.h>
 //===============================================================================================//
+// IsWow64Process is not available on all versions of Windows
+typedef BOOL (WINAPI *LPFN_ISWOW64PROCESS) (HANDLE, PBOOL);
+BOOL isProcess64bit(HANDLE hProcess)
+{
+	BOOL bIsProc64    = FALSE;
+	BOOL bIsThisWow64 = FALSE;
+	BOOL bIsProcWow64 = FALSE;
+	LPFN_ISWOW64PROCESS fnIsWow64Process = NULL;
+	
+	// get address of IsWow64Process
+	fnIsWow64Process = (LPFN_ISWOW64PROCESS) GetProcAddress(GetModuleHandle(TEXT("kernel32")), "IsWow64Process");
+
+	// Windows isn't 64-bit if IsWow64Process() doesn't exist
+	if (fnIsWow64Process != NULL) {
+		// check if current process (32-bit) is running in WoW64
+		// not handling if function fails -> guess not 64-bit
+		if (fnIsWow64Process(GetCurrentProcess(), &bIsThisWow64)) {
+			// Windows is 64-bit -> check if process is 64-bit
+			if (bIsThisWow64) {
+				fnIsWow64Process(hProcess, &bIsProcWow64);
+				// process running in WoW64 means it's 32-bit
+				bIsProc64 = !bIsProcWow64;
+			}
+		}
+	}
+
+	return bIsProc64;
+}
+//===============================================================================================//
 DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress, BOOL is64 )
 {    
 	WORD wIndex                          = 0;
@@ -195,8 +224,6 @@ HMODULE WINAPI LoadLibraryR( LPVOID lpBuffer, DWORD dwLength )
 // Note: The hProcess handle must have these access rights: PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | 
 //       PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ
 // Note: If you are passing in an lpParameter value, if it is a pointer, remember it is for a different address space.
-// Note: This function currently cant inject accross architectures, but only to architectures which are the 
-//       same as the arch this function is compiled as, e.g. x86->x86 and x64->x64 but not x64->x86 or x86->x64.
 HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLength, LPVOID lpParameter )
 {
 	BOOL bSuccess                             = FALSE;
@@ -205,6 +232,7 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 	HANDLE hThread                            = NULL;
 	DWORD dwReflectiveLoaderOffset            = 0;
 	DWORD dwThreadId                          = 0;
+	BOOL isRemoteProc64                       = FALSE;
 
 	__try
 	{
@@ -230,8 +258,25 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			// add the offset to ReflectiveLoader() to the remote library address...
 			lpReflectiveLoader = (LPTHREAD_START_ROUTINE)( (ULONG_PTR)lpRemoteLibraryBuffer + dwReflectiveLoaderOffset );
 
+#ifndef _WIN64
+			// determine if remote process is 32 or 64-bit
+			if (isProcess64bit(hProcess)) {
+				isRemoteProc64 = TRUE;
+			}
+			// injection into a 64-bit process from a 32-bit process requires transitioning from WoW64 to native Windows
+			if (isRemoteProc64) {
+				if ( ERROR_SUCCESS !=  inject_via_remotethread_wow64(hProcess, lpReflectiveLoader, lpParameter, &hThread) )
+					break;
+			}
+			else {
+				// create a remote thread in the host process to call the ReflectiveLoader!
+				hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
+			}
+#else
 			// create a remote thread in the host process to call the ReflectiveLoader!
-			hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
+				hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
+#endif
+			
 
 		} while( 0 );
 
