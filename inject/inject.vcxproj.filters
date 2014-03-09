@@ -20,6 +20,9 @@
     <ClCompile Include="src\LoadLibraryR.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\Inject64.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\GetProcAddressR.h">
@@ -29,6 +32,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\ReflectiveDLLInjection.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Inject64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

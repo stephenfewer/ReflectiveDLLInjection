@@ -28,26 +28,72 @@
 #include "LoadLibraryR.h"
 #include <stdio.h>
 //===============================================================================================//
-DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress )
+// IsWow64Process is not available on all versions of Windows
+typedef BOOL (WINAPI *LPFN_ISWOW64PROCESS) (HANDLE, PBOOL);
+BOOL isProcess64bit(HANDLE hProcess)
+{
+	BOOL bIsProc64    = FALSE;
+	BOOL bIsThisWow64 = FALSE;
+	BOOL bIsProcWow64 = FALSE;
+	LPFN_ISWOW64PROCESS fnIsWow64Process = NULL;
+	
+	// get address of IsWow64Process
+	fnIsWow64Process = (LPFN_ISWOW64PROCESS) GetProcAddress(GetModuleHandle(TEXT("kernel32")), "IsWow64Process");
+
+	// Windows isn't 64-bit if IsWow64Process() doesn't exist
+	if (fnIsWow64Process != NULL) {
+		// check if current process (32-bit) is running in WoW64
+		// not handling if function fails -> guess not 64-bit
+		if (fnIsWow64Process(GetCurrentProcess(), &bIsThisWow64)) {
+			// Windows is 64-bit -> check if process is 64-bit
+			if (bIsThisWow64) {
+				fnIsWow64Process(hProcess, &bIsProcWow64);
+				// process running in WoW64 means it's 32-bit
+				bIsProc64 = !bIsProcWow64;
+			}
+		}
+	}
+
+	return bIsProc64;
+}
+//===============================================================================================//
+DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress, BOOL is64 )
 {    
 	WORD wIndex                          = 0;
 	PIMAGE_SECTION_HEADER pSectionHeader = NULL;
-	PIMAGE_NT_HEADERS pNtHeaders         = NULL;
+	PIMAGE_NT_HEADERS32 pNtHeaders32     = NULL;
+	PIMAGE_NT_HEADERS64 pNtHeaders64     = NULL;
 	
-	pNtHeaders = (PIMAGE_NT_HEADERS)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
+	if (is64) {
+		pNtHeaders64 = (PIMAGE_NT_HEADERS64)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
 
-	pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders->OptionalHeader) + pNtHeaders->FileHeader.SizeOfOptionalHeader);
+		pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders64->OptionalHeader) + pNtHeaders64->FileHeader.SizeOfOptionalHeader);
 
-    if( dwRva < pSectionHeader[0].PointerToRawData )
-        return dwRva;
+		if( dwRva < pSectionHeader[0].PointerToRawData )
+			return dwRva;
 
-    for( wIndex=0 ; wIndex < pNtHeaders->FileHeader.NumberOfSections ; wIndex++ )
-    {   
-        if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
-           return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
-    }
-    
-    return 0;
+		for( wIndex=0 ; wIndex < pNtHeaders64->FileHeader.NumberOfSections ; wIndex++ )
+		{   
+			if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
+				return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
+		}
+	}
+	else {
+		pNtHeaders32 = (PIMAGE_NT_HEADERS32)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
+		
+		pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders32->OptionalHeader) + pNtHeaders32->FileHeader.SizeOfOptionalHeader);
+
+		if( dwRva < pSectionHeader[0].PointerToRawData )
+			return dwRva;
+
+		for( wIndex=0 ; wIndex < pNtHeaders32->FileHeader.NumberOfSections ; wIndex++ )
+		{   
+			if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
+				return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
+		}
+	}
+
+	return 0;
 }
 //===============================================================================================//
 DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
@@ -58,49 +104,44 @@ DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
 	UINT_PTR uiAddressArray  = 0;
 	UINT_PTR uiNameOrdinals  = 0;
 	DWORD dwCounter          = 0;
-#ifdef WIN_X64
-	DWORD dwCompiledArch = 2;
-#else
-	// This will catch Win32 and WinRT.
-	DWORD dwCompiledArch = 1;
-#endif
+	BOOL is64                = 0;
 
 	uiBaseAddress = (UINT_PTR)lpReflectiveDllBuffer;
 
 	// get the File Offset of the modules NT Header
 	uiExportDir = uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew;
 
-	// currenlty we can only process a PE file which is the same type as the one this fuction has  
-	// been compiled as, due to various offset in the PE structures being defined at compile time.
+	// process a PE file based on its architecture
 	if( ((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.Magic == 0x010B ) // PE32
 	{
-		if( dwCompiledArch != 1 )
-			return 0;
+		is64 = FALSE;
+		// uiNameArray = the address of the modules export directory entry
+		uiNameArray = (UINT_PTR)&((PIMAGE_NT_HEADERS32)uiExportDir)->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ];
+
 	}
 	else if( ((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.Magic == 0x020B ) // PE64
 	{
-		if( dwCompiledArch != 2 )
-			return 0;
+		is64 = TRUE;
+		// uiNameArray = the address of the modules export directory entry
+		uiNameArray = (UINT_PTR)&((PIMAGE_NT_HEADERS64)uiExportDir)->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ];
+
 	}
 	else
 	{
 		return 0;
 	}
 
-	// uiNameArray = the address of the modules export directory entry
-	uiNameArray = (UINT_PTR)&((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ];
-
 	// get the File Offset of the export directory
-	uiExportDir = uiBaseAddress + Rva2Offset( ((PIMAGE_DATA_DIRECTORY)uiNameArray)->VirtualAddress, uiBaseAddress );
+	uiExportDir = uiBaseAddress + Rva2Offset( ((PIMAGE_DATA_DIRECTORY)uiNameArray)->VirtualAddress, uiBaseAddress, is64 );
 
 	// get the File Offset for the array of name pointers
-	uiNameArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNames, uiBaseAddress );
+	uiNameArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNames, uiBaseAddress, is64 );
 
 	// get the File Offset for the array of addresses
-	uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress );
+	uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress, is64 );
 
 	// get the File Offset for the array of name ordinals
-	uiNameOrdinals = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNameOrdinals, uiBaseAddress );	
+	uiNameOrdinals = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNameOrdinals, uiBaseAddress, is64 );	
 
 	// get a counter for the number of exported functions...
 	dwCounter = ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->NumberOfNames;
@@ -108,18 +149,18 @@ DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
 	// loop through all the exported functions to find the ReflectiveLoader
 	while( dwCounter-- )
 	{
-		char * cpExportedFunctionName = (char *)(uiBaseAddress + Rva2Offset( DEREF_32( uiNameArray ), uiBaseAddress ));
+		char * cpExportedFunctionName = (char *)(uiBaseAddress + Rva2Offset( DEREF_32( uiNameArray ), uiBaseAddress, is64 ));
 
 		if( strstr( cpExportedFunctionName, "ReflectiveLoader" ) != NULL )
 		{
 			// get the File Offset for the array of addresses
-			uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress );	
+			uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress, is64 );	
 	
 			// use the functions name ordinal as an index into the array of name pointers
 			uiAddressArray += ( DEREF_16( uiNameOrdinals ) * sizeof(DWORD) );
 
 			// return the File Offset to the ReflectiveLoader() functions code...
-			return Rva2Offset( DEREF_32( uiAddressArray ), uiBaseAddress );
+			return Rva2Offset( DEREF_32( uiAddressArray ), uiBaseAddress, is64 );
 		}
 		// get the next exported function name
 		uiNameArray += sizeof(DWORD);
@@ -183,8 +224,6 @@ HMODULE WINAPI LoadLibraryR( LPVOID lpBuffer, DWORD dwLength )
 // Note: The hProcess handle must have these access rights: PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | 
 //       PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ
 // Note: If you are passing in an lpParameter value, if it is a pointer, remember it is for a different address space.
-// Note: This function currently cant inject accross architectures, but only to architectures which are the 
-//       same as the arch this function is compiled as, e.g. x86->x86 and x64->x64 but not x64->x86 or x86->x64.
 HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLength, LPVOID lpParameter )
 {
 	BOOL bSuccess                             = FALSE;
@@ -193,6 +232,7 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 	HANDLE hThread                            = NULL;
 	DWORD dwReflectiveLoaderOffset            = 0;
 	DWORD dwThreadId                          = 0;
+	BOOL isRemoteProc64                       = FALSE;
 
 	__try
 	{
@@ -218,8 +258,25 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			// add the offset to ReflectiveLoader() to the remote library address...
 			lpReflectiveLoader = (LPTHREAD_START_ROUTINE)( (ULONG_PTR)lpRemoteLibraryBuffer + dwReflectiveLoaderOffset );
 
+#ifndef _WIN64
+			// determine if remote process is 32 or 64-bit
+			if (isProcess64bit(hProcess)) {
+				isRemoteProc64 = TRUE;
+			}
+			// injection into a 64-bit process from a 32-bit process requires transitioning from WoW64 to native Windows
+			if (isRemoteProc64) {
+				if ( ERROR_SUCCESS !=  inject_via_remotethread_wow64(hProcess, lpReflectiveLoader, lpParameter, &hThread) )
+					break;
+			}
+			else {
+				// create a remote thread in the host process to call the ReflectiveLoader!
+				hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
+			}
+#else
 			// create a remote thread in the host process to call the ReflectiveLoader!
-			hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
+				hThread = CreateRemoteThread( hProcess, NULL, 1024*1024, lpReflectiveLoader, lpParameter, (DWORD)NULL, &dwThreadId );
+#endif
+			
 
 		} while( 0 );
 

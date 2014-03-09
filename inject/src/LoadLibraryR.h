@@ -29,6 +29,7 @@
 #define _REFLECTIVEDLLINJECTION_LOADLIBRARYR_H
 //===============================================================================================//
 #include "ReflectiveDLLInjection.h"
+#include "Inject64.h"
 
 DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer );
 
