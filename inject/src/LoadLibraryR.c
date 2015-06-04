@@ -28,26 +28,43 @@
 #include "LoadLibraryR.h"
 #include <stdio.h>
 //===============================================================================================//
-DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress )
+DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress, BOOL is64 )
 {    
 	WORD wIndex                          = 0;
 	PIMAGE_SECTION_HEADER pSectionHeader = NULL;
-	PIMAGE_NT_HEADERS pNtHeaders         = NULL;
+	PIMAGE_NT_HEADERS32 pNtHeaders32     = NULL;
+	PIMAGE_NT_HEADERS64 pNtHeaders64     = NULL;
 	
-	pNtHeaders = (PIMAGE_NT_HEADERS)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
+	if (is64) {
+		pNtHeaders64 = (PIMAGE_NT_HEADERS64)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
 
-	pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders->OptionalHeader) + pNtHeaders->FileHeader.SizeOfOptionalHeader);
+		pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders64->OptionalHeader) + pNtHeaders64->FileHeader.SizeOfOptionalHeader);
 
-    if( dwRva < pSectionHeader[0].PointerToRawData )
-        return dwRva;
+		if( dwRva < pSectionHeader[0].PointerToRawData )
+			return dwRva;
 
-    for( wIndex=0 ; wIndex < pNtHeaders->FileHeader.NumberOfSections ; wIndex++ )
-    {   
-        if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
-           return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
-    }
-    
-    return 0;
+		for( wIndex=0 ; wIndex < pNtHeaders64->FileHeader.NumberOfSections ; wIndex++ )
+		{   
+			if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
+				return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
+		}
+	}
+	else {
+		pNtHeaders32 = (PIMAGE_NT_HEADERS32)(uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew);
+		
+		pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders32->OptionalHeader) + pNtHeaders32->FileHeader.SizeOfOptionalHeader);
+
+		if( dwRva < pSectionHeader[0].PointerToRawData )
+			return dwRva;
+
+		for( wIndex=0 ; wIndex < pNtHeaders32->FileHeader.NumberOfSections ; wIndex++ )
+		{   
+			if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
+				return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
+		}
+	}
+
+	return 0;
 }
 //===============================================================================================//
 DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
@@ -58,49 +75,44 @@ DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
 	UINT_PTR uiAddressArray  = 0;
 	UINT_PTR uiNameOrdinals  = 0;
 	DWORD dwCounter          = 0;
-#ifdef WIN_X64
-	DWORD dwCompiledArch = 2;
-#else
-	// This will catch Win32 and WinRT.
-	DWORD dwCompiledArch = 1;
-#endif
+	BOOL is64                = 0;
 
 	uiBaseAddress = (UINT_PTR)lpReflectiveDllBuffer;
 
 	// get the File Offset of the modules NT Header
 	uiExportDir = uiBaseAddress + ((PIMAGE_DOS_HEADER)uiBaseAddress)->e_lfanew;
 
-	// currenlty we can only process a PE file which is the same type as the one this fuction has  
-	// been compiled as, due to various offset in the PE structures being defined at compile time.
+	// process a PE file based on its architecture
 	if( ((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.Magic == 0x010B ) // PE32
 	{
-		if( dwCompiledArch != 1 )
-			return 0;
+		is64 = FALSE;
+		// uiNameArray = the address of the modules export directory entry
+		uiNameArray = (UINT_PTR)&((PIMAGE_NT_HEADERS32)uiExportDir)->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ];
+
 	}
 	else if( ((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.Magic == 0x020B ) // PE64
 	{
-		if( dwCompiledArch != 2 )
-			return 0;
+		is64 = TRUE;
+		// uiNameArray = the address of the modules export directory entry
+		uiNameArray = (UINT_PTR)&((PIMAGE_NT_HEADERS64)uiExportDir)->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ];
+
 	}
 	else
 	{
 		return 0;
 	}
 
-	// uiNameArray = the address of the modules export directory entry
-	uiNameArray = (UINT_PTR)&((PIMAGE_NT_HEADERS)uiExportDir)->OptionalHeader.DataDirectory[ IMAGE_DIRECTORY_ENTRY_EXPORT ];
-
 	// get the File Offset of the export directory
-	uiExportDir = uiBaseAddress + Rva2Offset( ((PIMAGE_DATA_DIRECTORY)uiNameArray)->VirtualAddress, uiBaseAddress );
+	uiExportDir = uiBaseAddress + Rva2Offset( ((PIMAGE_DATA_DIRECTORY)uiNameArray)->VirtualAddress, uiBaseAddress, is64 );
 
 	// get the File Offset for the array of name pointers
-	uiNameArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNames, uiBaseAddress );
+	uiNameArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNames, uiBaseAddress, is64 );
 
 	// get the File Offset for the array of addresses
-	uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress );
+	uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress, is64 );
 
 	// get the File Offset for the array of name ordinals
-	uiNameOrdinals = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNameOrdinals, uiBaseAddress );	
+	uiNameOrdinals = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfNameOrdinals, uiBaseAddress, is64 );	
 
 	// get a counter for the number of exported functions...
 	dwCounter = ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->NumberOfNames;
@@ -108,18 +120,18 @@ DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
 	// loop through all the exported functions to find the ReflectiveLoader
 	while( dwCounter-- )
 	{
-		char * cpExportedFunctionName = (char *)(uiBaseAddress + Rva2Offset( DEREF_32( uiNameArray ), uiBaseAddress ));
+		char * cpExportedFunctionName = (char *)(uiBaseAddress + Rva2Offset( DEREF_32( uiNameArray ), uiBaseAddress, is64 ));
 
 		if( strstr( cpExportedFunctionName, "ReflectiveLoader" ) != NULL )
 		{
 			// get the File Offset for the array of addresses
-			uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress );	
+			uiAddressArray = uiBaseAddress + Rva2Offset( ((PIMAGE_EXPORT_DIRECTORY )uiExportDir)->AddressOfFunctions, uiBaseAddress, is64 );	
 	
 			// use the functions name ordinal as an index into the array of name pointers
 			uiAddressArray += ( DEREF_16( uiNameOrdinals ) * sizeof(DWORD) );
 
 			// return the File Offset to the ReflectiveLoader() functions code...
-			return Rva2Offset( DEREF_32( uiAddressArray ), uiBaseAddress );
+			return Rva2Offset( DEREF_32( uiAddressArray ), uiBaseAddress, is64 );
 		}
 		// get the next exported function name
 		uiNameArray += sizeof(DWORD);
