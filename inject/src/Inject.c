@@ -109,7 +109,10 @@ int main( int argc, char * argv[] )
 		WaitForSingleObject( hModule, -1 );
 
 	} while( 0 );
-
+	
+	if (hFile)
+		CloseHandle(hFile);
+	
 	if( lpBuffer )
 		HeapFree( GetProcessHeap(), 0, lpBuffer );
 
