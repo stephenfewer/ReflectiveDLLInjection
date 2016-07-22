@@ -206,15 +206,19 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			if( !dwReflectiveLoaderOffset )
 				break;
 
-			// alloc memory (RWX) in the host process for the image...
-			lpRemoteLibraryBuffer = VirtualAllocEx( hProcess, NULL, dwLength, MEM_RESERVE|MEM_COMMIT, PAGE_EXECUTE_READWRITE ); 
+			// alloc memory (RW) in the host process for the image...
+			VirtualProtectEx = VirtualAllocEx( hProcess, NULL, dwLength, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE ); 
 			if( !lpRemoteLibraryBuffer )
 				break;
 
 			// write the image into the host process...
 			if( !WriteProcessMemory( hProcess, lpRemoteLibraryBuffer, lpBuffer, dwLength, NULL ) )
 				break;
-			
+				
+			// change the permissions to (RX) to bypass W^X protections
+			if (!VirtualProtectEx(hProcess, lpRemoteLibraryBuffer, dwLength, PAGE_EXECUTE_READ, NULL))
+				break;
+
 			// add the offset to ReflectiveLoader() to the remote library address...
 			lpReflectiveLoader = (LPTHREAD_START_ROUTINE)( (ULONG_PTR)lpRemoteLibraryBuffer + dwReflectiveLoaderOffset );
 
