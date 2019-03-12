@@ -218,26 +218,26 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			// check if kernel32!BaseThreadInitThunk is patched in the target process...
 			LPVOID lpBaseThreadInitThunk = GetProcAddress( GetModuleHandle( "kernel32" ), "BaseThreadInitThunk" );
 			if( lpBaseThreadInitThunk != NULL ) {
-				UCHAR CleanBytes[16];
+				UCHAR ubCleanBytes[16];
 				SIZE_T szNumberRead = 0, szNumberWritten = 0;
 				BOOL bSuccess = FALSE;
 				DWORD dwOldProtect = 0;
 
 				// read our version of kernel32!BaseThreadInitThunk...
-				bSuccess = ReadProcessMemory( GetCurrentProcess( ), lpBaseThreadInitThunk, CleanBytes, sizeof( CleanBytes ), &szNumberRead );
-				if(bSuccess && szNumberRead == sizeof( CleanBytes )) {
+				bSuccess = ReadProcessMemory( GetCurrentProcess( ), lpBaseThreadInitThunk, ubCleanBytes, sizeof( ubCleanBytes ), &szNumberRead );
+				if(bSuccess && szNumberRead == sizeof( ubCleanBytes )) {
 					// make the code writeable...
-					bSuccess = VirtualProtectEx(hProcess, lpBaseThreadInitThunk, sizeof( CleanBytes ), PAGE_EXECUTE_READWRITE, &dwOldProtect );
+					bSuccess = VirtualProtectEx(hProcess, lpBaseThreadInitThunk, sizeof( ubCleanBytes ), PAGE_EXECUTE_READWRITE, &dwOldProtect );
 				}
 
 				if( bSuccess ) {
 					// patch the bytes back...
-					bSuccess = WriteProcessMemory( hProcess, lpBaseThreadInitThunk, CleanBytes, sizeof( CleanBytes ), &szNumberWritten );
+					bSuccess = WriteProcessMemory( hProcess, lpBaseThreadInitThunk, ubCleanBytes, sizeof( ubCleanBytes ), &szNumberWritten );
 				}
 
-				if( bSuccess && szNumberWritten == sizeof( CleanBytes ) ) {
+				if( bSuccess && szNumberWritten == sizeof( ubCleanBytes ) ) {
 					// restore the page properties...
-					bSuccess = VirtualProtectEx( hProcess, lpBaseThreadInitThunk, sizeof( CleanBytes ), dwOldProtect, &dwOldProtect );
+					bSuccess = VirtualProtectEx( hProcess, lpBaseThreadInitThunk, sizeof( ubCleanBytes ), dwOldProtect, &dwOldProtect );
 				}
 
 				if( !bSuccess ) {
