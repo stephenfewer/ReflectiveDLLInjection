@@ -38,16 +38,16 @@ DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress )
 
 	pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders->OptionalHeader) + pNtHeaders->FileHeader.SizeOfOptionalHeader);
 
-    if( dwRva < pSectionHeader[0].PointerToRawData )
-        return dwRva;
+	if( dwRva < pSectionHeader[0].PointerToRawData )
+		return dwRva;
 
-    for( wIndex=0 ; wIndex < pNtHeaders->FileHeader.NumberOfSections ; wIndex++ )
-    {   
-        if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
-           return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
-    }
-    
-    return 0;
+	for( wIndex=0 ; wIndex < pNtHeaders->FileHeader.NumberOfSections ; wIndex++ )
+	{
+		if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )
+		   return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
+	}
+
+	return 0;
 }
 //===============================================================================================//
 DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
