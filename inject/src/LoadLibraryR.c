@@ -38,16 +38,16 @@ DWORD Rva2Offset( DWORD dwRva, UINT_PTR uiBaseAddress )
 
 	pSectionHeader = (PIMAGE_SECTION_HEADER)((UINT_PTR)(&pNtHeaders->OptionalHeader) + pNtHeaders->FileHeader.SizeOfOptionalHeader);
 
-    if( dwRva < pSectionHeader[0].PointerToRawData )
-        return dwRva;
+	if( dwRva < pSectionHeader[0].PointerToRawData )
+		return dwRva;
 
-    for( wIndex=0 ; wIndex < pNtHeaders->FileHeader.NumberOfSections ; wIndex++ )
-    {   
-        if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )           
-           return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
-    }
-    
-    return 0;
+	for( wIndex=0 ; wIndex < pNtHeaders->FileHeader.NumberOfSections ; wIndex++ )
+	{
+		if( dwRva >= pSectionHeader[wIndex].VirtualAddress && dwRva < (pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].SizeOfRawData) )
+		   return ( dwRva - pSectionHeader[wIndex].VirtualAddress + pSectionHeader[wIndex].PointerToRawData );
+	}
+
+	return 0;
 }
 //===============================================================================================//
 DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
@@ -214,7 +214,37 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			// write the image into the host process...
 			if( !WriteProcessMemory( hProcess, lpRemoteLibraryBuffer, lpBuffer, dwLength, NULL ) )
 				break;
-			
+
+			// check if kernel32!BaseThreadInitThunk is patched in the target process...
+			LPVOID lpBaseThreadInitThunk = GetProcAddress( GetModuleHandle( "kernel32" ), "BaseThreadInitThunk" );
+			if( lpBaseThreadInitThunk != NULL ) {
+				UCHAR ubCleanBytes[16];
+				SIZE_T szNumberRead = 0, szNumberWritten = 0;
+				BOOL bSuccess = FALSE;
+				DWORD dwOldProtect = 0;
+
+				// read our version of kernel32!BaseThreadInitThunk...
+				bSuccess = ReadProcessMemory( GetCurrentProcess( ), lpBaseThreadInitThunk, ubCleanBytes, sizeof( ubCleanBytes ), &szNumberRead );
+				if(bSuccess && szNumberRead == sizeof( ubCleanBytes )) {
+					// make the code writeable...
+					bSuccess = VirtualProtectEx(hProcess, lpBaseThreadInitThunk, sizeof( ubCleanBytes ), PAGE_EXECUTE_READWRITE, &dwOldProtect );
+				}
+
+				if( bSuccess ) {
+					// patch the bytes back...
+					bSuccess = WriteProcessMemory( hProcess, lpBaseThreadInitThunk, ubCleanBytes, sizeof( ubCleanBytes ), &szNumberWritten );
+				}
+
+				if( bSuccess && szNumberWritten == sizeof( ubCleanBytes ) ) {
+					// restore the page properties...
+					bSuccess = VirtualProtectEx( hProcess, lpBaseThreadInitThunk, sizeof( ubCleanBytes ), dwOldProtect, &dwOldProtect );
+				}
+
+				if( !bSuccess ) {
+					break;
+				}
+			}
+
 			// add the offset to ReflectiveLoader() to the remote library address...
 			lpReflectiveLoader = (LPTHREAD_START_ROUTINE)( (ULONG_PTR)lpRemoteLibraryBuffer + dwReflectiveLoaderOffset );
 
