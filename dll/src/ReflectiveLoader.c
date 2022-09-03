@@ -112,10 +112,15 @@ DLLEXPORT ULONG_PTR WINAPI ReflectiveLoader( VOID )
 #else
 #ifdef WIN_X86
 	uiBaseAddress = __readfsdword( 0x30 );
+#else
+#ifdef WIN_ARM64
+	uiBaseAddress = __readx18qword(0x60);
 #else WIN_ARM
 	uiBaseAddress = *(DWORD *)( (BYTE *)_MoveFromCoprocessor( 15, 0, 13, 0, 2 ) + 0x30 );
 #endif
 #endif
+#endif
+
 
 	// get the processes loaded modules. ref: http://msdn.microsoft.com/en-us/library/aa813708(VS.85).aspx
 	uiBaseAddress = (ULONG_PTR)((_PPEB)uiBaseAddress)->pLdr;

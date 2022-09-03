@@ -61,8 +61,12 @@ DWORD GetReflectiveLoaderOffset( VOID * lpReflectiveDllBuffer )
 #ifdef WIN_X64
 	DWORD dwCompiledArch = 2;
 #else
+#ifdef WIN_ARM64
+	DWORD dwCompiledArch = 2;
+#else
 	// This will catch Win32 and WinRT.
 	DWORD dwCompiledArch = 1;
+#endif
 #endif
 
 	uiBaseAddress = (UINT_PTR)lpReflectiveDllBuffer;
@@ -205,7 +209,6 @@ HANDLE WINAPI LoadRemoteLibraryR( HANDLE hProcess, LPVOID lpBuffer, DWORD dwLeng
 			dwReflectiveLoaderOffset = GetReflectiveLoaderOffset( lpBuffer );
 			if( !dwReflectiveLoaderOffset )
 				break;
-
 			// alloc memory (RWX) in the host process for the image...
 			lpRemoteLibraryBuffer = VirtualAllocEx( hProcess, NULL, dwLength, MEM_RESERVE|MEM_COMMIT, PAGE_EXECUTE_READWRITE ); 
 			if( !lpRemoteLibraryBuffer )
