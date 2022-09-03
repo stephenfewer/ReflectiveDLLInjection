@@ -53,8 +53,12 @@ int main( int argc, char * argv[] )
 #else
 #ifdef WIN_X86
 	char * cpDllFile  = "reflective_dll.dll";
+#else
+#ifdef WIN_ARM64
+	char* cpDllFile = "reflective_dll.arm64.dll";
 #else WIN_ARM
 	char * cpDllFile  = "reflective_dll.arm.dll";
+#endif
 #endif
 #endif
 
